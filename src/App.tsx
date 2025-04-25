@@ -1,14 +1,12 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { Character } from './components/Character'
-import { PushableObject } from './components/PushableObject'
 
 function App() {
   const mountRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<{ [key: string]: boolean }>({})
   const prevKeysRef = useRef<{ [key: string]: boolean }>({})
   const characterRef = useRef<Character | null>(null)
-  const pushableObjectsRef = useRef<PushableObject[]>([])
 
   useEffect(() => {
     if (!mountRef.current) return
@@ -17,9 +15,9 @@ function App() {
     const scene = new THREE.Scene()
 
     // Calculate camera dimensions to maintain pixel scale
-    const pixelScale = 2.25 // Increased from 1.5 to 2.25 for 1.5x size
+    const pixelScale = 2.25
     const aspectRatio = window.innerWidth / window.innerHeight
-    const viewHeight = 7.5 // Reduced from 10 to 7.5 for closer view
+    const viewHeight = 7.5
     const viewWidth = viewHeight * aspectRatio
 
     const camera = new THREE.OrthographicCamera(
@@ -32,10 +30,10 @@ function App() {
     )
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: false, // Disable antialiasing for pixel art
-      alpha: true, // Enable alpha channel
+      antialias: false,
+      alpha: true,
     })
-    renderer.setClearColor(0x000000, 0) // Make background transparent
+    renderer.setClearColor(0x000000, 0)
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(window.innerWidth, window.innerHeight)
     mountRef.current.appendChild(renderer.domElement)
@@ -45,21 +43,16 @@ function App() {
     camera.position.y = 0
     camera.lookAt(0, 0, 0)
 
+    // Create ground platform
+    const groundGeometry = new THREE.BoxGeometry(20, 0.5, 1)
+    const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 })
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial)
+    ground.position.set(0, -3.25, 0) // Position slightly below character's ground level
+    scene.add(ground)
+
     // Create character
     const character = new Character(scene, pixelScale)
     characterRef.current = character
-
-    // Create pushable objects
-    const pushableObjects = [
-      new PushableObject(scene, 2, 0, 1.5, 1.5, 0xff0000), // Red box
-      new PushableObject(scene, -2, 0, 1.5, 1.5, 0x00ff00), // Green box
-      new PushableObject(scene, 0, 2, 1.5, 1.5, 0x0000ff), // Blue box
-      new PushableObject(scene, 0, -2, 1.5, 1.5, 0xffff00), // Yellow box
-    ]
-    pushableObjectsRef.current = pushableObjects
-
-    // Add pushable objects to character
-    pushableObjects.forEach((object) => character.addPushableObject(object))
 
     // Handle keyboard input
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -135,7 +128,7 @@ function App() {
         top: 0,
         left: 0,
         overflow: 'hidden',
-        backgroundColor: '#87CEEB', // Match scene background color
+        backgroundColor: '#87CEEB', // Sky blue background
       }}
     />
   )

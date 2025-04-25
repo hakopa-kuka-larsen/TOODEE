@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { PushableObject } from './PushableObject'
 
-type Direction = 'up' | 'down' | 'left' | 'right'
-type AnimationType = 'stand' | 'walk' | 'run' | 'jump' | 'push'
+type Direction = 'left' | 'right'
+type AnimationType = 'stand' | 'walk' | 'run' | 'jump'
 type Frame = { x: number; y: number; w: number; h: number }
 type Input = {
   keys: { [key: string]: boolean }
@@ -15,7 +15,7 @@ export class Character {
   private spriteMap: THREE.Texture
   private spriteMaterial: THREE.SpriteMaterial
   private currentAnimation: AnimationType = 'stand'
-  private currentDirection: Direction = 'down'
+  private currentDirection: Direction = 'right'
   private frameIndex: number = 0
   private animationTimer: number = 0
   private isRunning: boolean = false
@@ -24,11 +24,11 @@ export class Character {
   private jumpVelocity: number = 0
   private jumpHeight: number = 2
   private gravity: number = 15
-  private groundY: number = 0
+  private groundY: number = -3 // Position of the ground
 
   // Movement properties
   private velocity = new THREE.Vector2(0, 0)
-  private moveSpeed = { walk: 4, run: 8, push: 2 }
+  private moveSpeed = { walk: 4, run: 8 }
   private deceleration = 15 // How quickly the character slows down
   private wasMoving = false // Track if character was moving last frame
   private momentum = 0.8 // How much momentum is preserved when changing direction (0-1)
@@ -37,24 +37,10 @@ export class Character {
   // Animation frame coordinates
   private animations: Record<AnimationType, Record<Direction, Frame[]>> = {
     stand: {
-      down: [{ x: 0, y: 0, w: 64, h: 64 }],
-      up: [{ x: 0, y: 64, w: 64, h: 64 }],
       right: [{ x: 0, y: 128, w: 64, h: 64 }],
       left: [{ x: 0, y: 192, w: 64, h: 64 }],
     },
     walk: {
-      down: Array.from({ length: 6 }, (_, i) => ({
-        x: i * 64,
-        y: 256,
-        w: 64,
-        h: 64,
-      })),
-      up: Array.from({ length: 6 }, (_, i) => ({
-        x: i * 64,
-        y: 320,
-        w: 64,
-        h: 64,
-      })),
       right: Array.from({ length: 6 }, (_, i) => ({
         x: i * 64,
         y: 384,
@@ -69,18 +55,6 @@ export class Character {
       })),
     },
     run: {
-      down: [0, 1, 6, 3, 4, 7].map((i) => ({
-        x: i * 64,
-        y: 256,
-        w: 64,
-        h: 64,
-      })),
-      up: [0, 1, 6, 3, 4, 7].map((i) => ({
-        x: i * 64,
-        y: 320,
-        w: 64,
-        h: 64,
-      })),
       right: [0, 1, 6, 3, 4, 7].map((i) => ({
         x: i * 64,
         y: 384,
@@ -95,23 +69,11 @@ export class Character {
       })),
     },
     jump: {
-      down: [
-        { x: 5 * 64, y: 0, w: 64, h: 64 }, // Frame 1: crouch
-        { x: 6 * 64, y: 0, w: 64, h: 64 }, // Frame 2: rising
-        { x: 7 * 64, y: 0, w: 64, h: 64 }, // Frame 3: airborne
-        { x: 5 * 64, y: 0, w: 64, h: 64 }, // Frame 4: landing (same as frame 1)
-      ],
-      up: [
-        { x: 5 * 64, y: 64, w: 64, h: 64 },
-        { x: 6 * 64, y: 64, w: 64, h: 64 },
-        { x: 7 * 64, y: 64, w: 64, h: 64 },
-        { x: 5 * 64, y: 64, w: 64, h: 64 },
-      ],
       right: [
-        { x: 5 * 64, y: 128, w: 64, h: 64 },
-        { x: 6 * 64, y: 128, w: 64, h: 64 },
-        { x: 7 * 64, y: 128, w: 64, h: 64 },
-        { x: 5 * 64, y: 128, w: 64, h: 64 },
+        { x: 5 * 64, y: 128, w: 64, h: 64 }, // Frame 1: crouch
+        { x: 6 * 64, y: 128, w: 64, h: 64 }, // Frame 2: rising
+        { x: 7 * 64, y: 128, w: 64, h: 64 }, // Frame 3: airborne
+        { x: 5 * 64, y: 128, w: 64, h: 64 }, // Frame 4: landing (same as frame 1)
       ],
       left: [
         { x: 5 * 64, y: 192, w: 64, h: 64 },
@@ -120,39 +82,12 @@ export class Character {
         { x: 5 * 64, y: 192, w: 64, h: 64 },
       ],
     },
-    push: {
-      down: Array.from({ length: 2 }, (_, i) => ({
-        x: (i + 1) * 64,
-        y: 0,
-        w: 64,
-        h: 64,
-      })),
-      up: Array.from({ length: 2 }, (_, i) => ({
-        x: (i + 1) * 64,
-        y: 64,
-        w: 64,
-        h: 64,
-      })),
-      right: Array.from({ length: 2 }, (_, i) => ({
-        x: (i + 1) * 64,
-        y: 128,
-        w: 64,
-        h: 64,
-      })),
-      left: Array.from({ length: 2 }, (_, i) => ({
-        x: (i + 1) * 64,
-        y: 192,
-        w: 64,
-        h: 64,
-      })),
-    },
   }
 
   private animationTiming: Record<Exclude<AnimationType, 'stand'>, number[]> = {
     walk: [135, 135, 135, 135, 135, 135],
     run: [80, 55, 125, 80, 55, 125],
     jump: [300, 150, 100, 300],
-    push: [300, 300],
   }
 
   private pushableObjects: PushableObject[] = []
@@ -169,7 +104,7 @@ export class Character {
         texture.magFilter = THREE.NearestFilter
         texture.minFilter = THREE.NearestFilter
         texture.generateMipmaps = false
-        this.updateTextureFrame(this.animations.stand.down[0])
+        this.updateTextureFrame(this.animations.stand.right[0])
       }
     )
 
@@ -184,6 +119,9 @@ export class Character {
 
     // Scale the sprite to match pixel size
     this.sprite.scale.set(pixelScale, pixelScale, 1)
+
+    // Set initial position
+    this.sprite.position.set(0, this.groundY, 0)
 
     // Add to scene
     scene.add(this.sprite)
@@ -262,17 +200,14 @@ export class Character {
       }
     }
 
-    // Movement input
+    // Movement input (only left/right)
     const moveInput = new THREE.Vector2(0, 0)
     if (input.isKeyDown('KeyD') || input.isKeyDown('ArrowRight'))
       moveInput.x += 1
     if (input.isKeyDown('KeyA') || input.isKeyDown('ArrowLeft'))
       moveInput.x -= 1
-    if (input.isKeyDown('KeyW') || input.isKeyDown('ArrowUp')) moveInput.y += 1
-    if (input.isKeyDown('KeyS') || input.isKeyDown('ArrowDown'))
-      moveInput.y -= 1
 
-    // Normalize diagonal movement
+    // Normalize movement
     if (moveInput.length() > 0) moveInput.normalize()
 
     // Check for pushable objects when moving
@@ -321,12 +256,7 @@ export class Character {
     if (moveInput.length() > 0) {
       const targetVelocity = moveInput
         .clone()
-        .multiplyScalar(
-          (this.isPushing ? this.moveSpeed.push : currentSpeed) *
-            speedMultiplier
-        )
-
-      // Apply momentum when changing direction
+        .multiplyScalar(currentSpeed * speedMultiplier)
       this.velocity.lerp(targetVelocity, 1 - this.momentum)
       this.wasMoving = true
     } else if (this.wasMoving) {
@@ -343,15 +273,12 @@ export class Character {
 
     // Update position
     this.sprite.position.x += this.velocity.x * deltaTime
-    if (!this.isJumping) {
-      this.sprite.position.y += this.velocity.y * deltaTime
-    }
 
     // Update direction based on movement
-    if (Math.abs(this.velocity.x) > Math.abs(this.velocity.y)) {
-      this.currentDirection = this.velocity.x > 0 ? 'right' : 'left'
-    } else if (Math.abs(this.velocity.y) > Math.abs(this.velocity.x)) {
-      this.currentDirection = this.velocity.y > 0 ? 'up' : 'down'
+    if (this.velocity.x > 0) {
+      this.currentDirection = 'right'
+    } else if (this.velocity.x < 0) {
+      this.currentDirection = 'left'
     }
 
     // Update animation state
