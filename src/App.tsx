@@ -1,12 +1,16 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { Character } from './components/Character'
+import { Ground } from './components/Ground'
+import { Platform } from './components/Platform'
 
 function App() {
   const mountRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef<{ [key: string]: boolean }>({})
   const prevKeysRef = useRef<{ [key: string]: boolean }>({})
   const characterRef = useRef<Character | null>(null)
+  const groundRef = useRef<Ground | null>(null)
+  const cameraRef = useRef<THREE.OrthographicCamera | null>(null)
 
   useEffect(() => {
     if (!mountRef.current) return
@@ -28,6 +32,7 @@ function App() {
       0.1,
       1000
     )
+    cameraRef.current = camera
 
     const renderer = new THREE.WebGLRenderer({
       antialias: false,
@@ -43,16 +48,25 @@ function App() {
     camera.position.y = 0
     camera.lookAt(0, 0, 0)
 
-    // Create ground platform
-    const groundGeometry = new THREE.BoxGeometry(20, 0.5, 1)
-    const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 })
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial)
-    ground.position.set(0, -3.25, 0) // Position slightly below character's ground level
-    scene.add(ground)
+    // Create ground
+    const ground = new Ground(scene)
+    groundRef.current = ground
+
+    // Create platforms
+    const platforms = [
+      new Platform(scene, -3, -1.5, 3), // Left platform, lowered
+      new Platform(scene, 3, -0.5, 3), // Right platform, lowered
+      new Platform(scene, 0, 0.5, 3), // Middle platform, lowered
+      new Platform(scene, -2, 1.5, 3), // Upper left platform, lowered
+      new Platform(scene, 2, 2.5, 3), // Upper right platform, lowered
+    ]
 
     // Create character
-    const character = new Character(scene, pixelScale)
+    const character = new Character(scene, ground, pixelScale)
     characterRef.current = character
+
+    // Add platforms to character for collision detection
+    platforms.forEach((platform) => character.addPlatform(platform))
 
     // Handle keyboard input
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -99,6 +113,16 @@ function App() {
       }
 
       character.update(delta, input)
+
+      // Update camera to follow character vertically with smooth lerp
+      const characterPos = character.getPosition()
+      if (camera.position.y !== characterPos.y) {
+        camera.position.y = THREE.MathUtils.lerp(
+          camera.position.y,
+          characterPos.y,
+          0.1
+        )
+      }
 
       // Update previous keys state
       prevKeysRef.current = { ...keysRef.current }

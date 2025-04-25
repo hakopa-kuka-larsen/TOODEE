@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { PushableObject } from './PushableObject'
+import { Ground } from './Ground'
+import { Platform } from './Platform'
 
 type Direction = 'left' | 'right'
 type AnimationType = 'stand' | 'walk' | 'run' | 'jump'
@@ -22,9 +24,14 @@ export class Character {
   private isJumping: boolean = false
   private isPushing: boolean = false
   private jumpVelocity: number = 0
-  private jumpHeight: number = 2
+  private jumpHeight: number = 4
   private gravity: number = 15
-  private groundY: number = -3 // Position of the ground
+  private ground: Ground
+  private platforms: Platform[] = []
+
+  // Character dimensions
+  private width: number = 1
+  private height: number = 1
 
   // Movement properties
   private velocity = new THREE.Vector2(0, 0)
@@ -94,7 +101,9 @@ export class Character {
   private currentPushableObject: PushableObject | null = null
   private pushDistance: number = 1.2 // Distance at which character can push objects
 
-  constructor(scene: THREE.Scene, pixelScale: number = 2) {
+  constructor(scene: THREE.Scene, ground: Ground, pixelScale: number = 2) {
+    this.ground = ground
+
     // Load sprite sheet
     const textureLoader = new THREE.TextureLoader()
 
@@ -120,8 +129,9 @@ export class Character {
     // Scale the sprite to match pixel size
     this.sprite.scale.set(pixelScale, pixelScale, 1)
 
-    // Set initial position
-    this.sprite.position.set(0, this.groundY, 0)
+    // Set initial position to be just above the ground
+    const groundLevel = ground.getGroundLevel()
+    this.sprite.position.set(0, groundLevel + this.height / 1, 0)
 
     // Add to scene
     scene.add(this.sprite)
@@ -142,6 +152,10 @@ export class Character {
 
   addPushableObject(object: PushableObject) {
     this.pushableObjects.push(object)
+  }
+
+  addPlatform(platform: Platform) {
+    this.platforms.push(platform)
   }
 
   private checkPushableObjectCollision(
@@ -183,21 +197,18 @@ export class Character {
   }
 
   update(deltaTime: number, input: Input) {
-    // Handle jumping
-    if (input.isKeyPressed('Space') && !this.isJumping) {
-      this.isJumping = true
-      this.jumpVelocity = Math.sqrt(2 * this.gravity * this.jumpHeight)
+    // Store previous position for collision resolution
+    const previousY = this.sprite.position.y
+
+    // Apply gravity
+    if (!this.isOnGround()) {
+      this.velocity.y -= this.gravity * deltaTime
     }
 
-    if (this.isJumping) {
-      this.sprite.position.y += this.jumpVelocity * deltaTime
-      this.jumpVelocity -= this.gravity * deltaTime
-
-      if (this.sprite.position.y <= this.groundY) {
-        this.sprite.position.y = this.groundY
-        this.isJumping = false
-        this.jumpVelocity = 0
-      }
+    // Handle jumping
+    if (input.isKeyPressed('Space') && this.isOnGround()) {
+      this.isJumping = true
+      this.velocity.y = Math.sqrt(2 * this.gravity * this.jumpHeight)
     }
 
     // Movement input (only left/right)
@@ -209,6 +220,113 @@ export class Character {
 
     // Normalize movement
     if (moveInput.length() > 0) moveInput.normalize()
+
+    // Set running state
+    this.isRunning = input.isKeyDown('ShiftLeft')
+    const currentSpeed = this.isRunning
+      ? this.moveSpeed.run
+      : this.moveSpeed.walk
+
+    // Calculate directional change penalty
+    let speedMultiplier = 1
+    if (this.velocity.x !== 0 && moveInput.length() > 0) {
+      const currentDirection = Math.sign(this.velocity.x)
+      const targetDirection = Math.sign(moveInput.x)
+
+      // If moving in opposite direction
+      if (currentDirection !== targetDirection) {
+        speedMultiplier = this.directionalChangePenalty
+      }
+    }
+
+    // Apply movement
+    if (moveInput.length() > 0) {
+      // Accelerate
+      this.velocity.x = moveInput.x * currentSpeed * speedMultiplier
+    } else {
+      // Decelerate
+      this.velocity.x *= Math.max(0, 1 - this.deceleration * deltaTime)
+    }
+
+    // Update position
+    this.sprite.position.x += this.velocity.x * deltaTime
+    this.sprite.position.y += this.velocity.y * deltaTime
+
+    // Check ground and platform collisions
+    let isOnSurface = false
+    let surfaceLevel = -Infinity
+
+    // Check ground first
+    const groundLevel = this.ground.getGroundLevel()
+    if (this.sprite.position.y - this.height / 2 < groundLevel) {
+      surfaceLevel = groundLevel
+      isOnSurface = true
+    }
+
+    // Check platforms
+    for (const platform of this.platforms) {
+      if (platform.isWithinBounds(this.sprite.position.x)) {
+        const platformTop = platform.getTopLevel()
+
+        // Only collide if we're falling onto the platform
+        if (
+          this.velocity.y <= 0 &&
+          previousY - this.height / 2 >= platformTop &&
+          this.sprite.position.y - this.height / 2 < platformTop
+        ) {
+          // If this platform is higher than our current surface, use it instead
+          if (platformTop > surfaceLevel) {
+            surfaceLevel = platformTop
+            isOnSurface = true
+          }
+        }
+      }
+    }
+
+    // Apply collision resolution if we hit a surface
+    if (isOnSurface) {
+      this.sprite.position.y = surfaceLevel + this.height / 2
+      this.velocity.y = 0
+      this.isJumping = false
+    }
+
+    // Update animation based on state
+    let newAnimation: AnimationType = 'stand'
+
+    if (!this.isOnGround()) {
+      newAnimation = 'jump'
+    } else if (Math.abs(this.velocity.x) > 0.1) {
+      newAnimation = this.isRunning ? 'run' : 'walk'
+    }
+
+    // Update direction based on movement
+    if (this.velocity.x !== 0) {
+      this.currentDirection = this.velocity.x > 0 ? 'right' : 'left'
+    }
+
+    // Update animation if it changed
+    if (newAnimation !== this.currentAnimation) {
+      this.currentAnimation = newAnimation
+      this.frameIndex = 0
+      this.animationTimer = 0
+    }
+
+    // Update animation frame
+    this.animationTimer += deltaTime * 1000
+    if (this.currentAnimation !== 'stand') {
+      const timing = this.animationTiming[this.currentAnimation]
+      if (this.animationTimer >= timing[this.frameIndex]) {
+        this.animationTimer = 0
+        this.frameIndex = (this.frameIndex + 1) % timing.length
+      }
+    }
+
+    // Update sprite texture
+    const frame =
+      this.animations[this.currentAnimation][this.currentDirection][
+        this.frameIndex
+      ]
+    this.updateTextureFrame(frame)
 
     // Check for pushable objects when moving
     if (moveInput.length() > 0) {
@@ -232,98 +350,34 @@ export class Character {
         this.currentPushableObject = null
       }
     }
+  }
 
-    // Set running state
-    this.isRunning = input.isKeyDown('ShiftLeft')
-    const currentSpeed = this.isRunning
-      ? this.moveSpeed.run
-      : this.moveSpeed.walk
+  private isOnGround(): boolean {
+    // Check ground
+    if (
+      this.sprite.position.y - this.height / 2 <=
+      this.ground.getGroundLevel() + 0.01
+    ) {
+      return true
+    }
 
-    // Calculate directional change penalty
-    let speedMultiplier = 1
-    if (this.velocity.length() > 0 && moveInput.length() > 0) {
-      const currentDirection = this.velocity.clone().normalize()
-      const targetDirection = moveInput.clone()
-      const dotProduct = currentDirection.dot(targetDirection)
-
-      // If moving in opposite direction (dot product close to -1)
-      if (dotProduct < -0.5) {
-        speedMultiplier = this.directionalChangePenalty
+    // Check platforms
+    for (const platform of this.platforms) {
+      if (platform.isWithinBounds(this.sprite.position.x)) {
+        const platformTop = platform.getTopLevel()
+        if (
+          Math.abs(this.sprite.position.y - this.height / 2 - platformTop) <=
+          0.01
+        ) {
+          return true
+        }
       }
     }
 
-    // Update velocity based on input with momentum
-    if (moveInput.length() > 0) {
-      const targetVelocity = moveInput
-        .clone()
-        .multiplyScalar(currentSpeed * speedMultiplier)
-      this.velocity.lerp(targetVelocity, 1 - this.momentum)
-      this.wasMoving = true
-    } else if (this.wasMoving) {
-      // Apply deceleration when no input
-      const deceleration = this.deceleration * deltaTime
-      const currentSpeed = this.velocity.length()
-      if (currentSpeed > deceleration) {
-        this.velocity.multiplyScalar(1 - deceleration / currentSpeed)
-      } else {
-        this.velocity.set(0, 0)
-        this.wasMoving = false
-      }
-    }
+    return false
+  }
 
-    // Update position
-    this.sprite.position.x += this.velocity.x * deltaTime
-
-    // Update direction based on movement
-    if (this.velocity.x > 0) {
-      this.currentDirection = 'right'
-    } else if (this.velocity.x < 0) {
-      this.currentDirection = 'left'
-    }
-
-    // Update animation state
-    if (this.isJumping) {
-      this.currentAnimation = 'jump'
-    } else if (this.isPushing) {
-      this.currentAnimation = 'push'
-    } else if (this.velocity.length() > 0) {
-      this.currentAnimation = this.isRunning ? 'run' : 'walk'
-    } else {
-      this.currentAnimation = 'stand'
-    }
-
-    // Update animation frame
-    this.animationTimer += deltaTime * 1000 // Convert to milliseconds
-    if (this.currentAnimation !== 'stand') {
-      const timing = this.animationTiming[this.currentAnimation]
-      if (this.animationTimer >= timing[this.frameIndex]) {
-        this.animationTimer = 0
-        this.frameIndex = (this.frameIndex + 1) % timing.length
-      }
-    }
-
-    // Get current animation frames
-    const animationFrames =
-      this.animations[this.currentAnimation]?.[this.currentDirection]
-    if (!animationFrames || animationFrames.length === 0) {
-      // Fallback to stand animation if current animation doesn't exist
-      this.currentAnimation = 'stand'
-      this.frameIndex = 0
-      return
-    }
-
-    // Ensure frameIndex is within bounds
-    this.frameIndex = this.frameIndex % animationFrames.length
-
-    // Update sprite texture coordinates
-    const frame = animationFrames[this.frameIndex]
-    if (frame) {
-      this.updateTextureFrame(frame)
-    }
-
-    // Update pushable objects
-    if (this.currentPushableObject) {
-      this.currentPushableObject.update(deltaTime)
-    }
+  getPosition(): THREE.Vector3 {
+    return this.sprite.position.clone()
   }
 }
