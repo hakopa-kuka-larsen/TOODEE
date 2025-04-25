@@ -24,7 +24,7 @@ export class Character {
   private jumpVelocity: number = 0
   private jumpHeight: number = 2
   private gravity: number = 15
-  private groundY: number = -3 // Position of the ground
+  private groundY: number = -2.75 // Adjusted ground position to account for sprite height
 
   // Movement properties
   private velocity = new THREE.Vector2(0, 0)
@@ -252,41 +252,21 @@ export class Character {
       }
     }
 
-    // Update velocity based on input with momentum
+    // Apply movement
     if (moveInput.length() > 0) {
-      const targetVelocity = moveInput
-        .clone()
-        .multiplyScalar(currentSpeed * speedMultiplier)
-      this.velocity.lerp(targetVelocity, 1 - this.momentum)
-      this.wasMoving = true
-    } else if (this.wasMoving) {
-      // Apply deceleration when no input
-      const deceleration = this.deceleration * deltaTime
-      const currentSpeed = this.velocity.length()
-      if (currentSpeed > deceleration) {
-        this.velocity.multiplyScalar(1 - deceleration / currentSpeed)
-      } else {
-        this.velocity.set(0, 0)
-        this.wasMoving = false
-      }
+      // Accelerate
+      this.velocity.x = moveInput.x * currentSpeed * speedMultiplier
+    } else {
+      // Decelerate
+      this.velocity.x *= Math.max(0, 1 - this.deceleration * deltaTime)
     }
 
-    // Update position
+    // Apply velocity to position
     this.sprite.position.x += this.velocity.x * deltaTime
 
-    // Update direction based on movement
-    if (this.velocity.x > 0) {
-      this.currentDirection = 'right'
-    } else if (this.velocity.x < 0) {
-      this.currentDirection = 'left'
-    }
-
-    // Update animation state
-    if (this.isJumping) {
-      this.currentAnimation = 'jump'
-    } else if (this.isPushing) {
-      this.currentAnimation = 'push'
-    } else if (this.velocity.length() > 0) {
+    // Update animation based on movement
+    if (this.velocity.x !== 0) {
+      this.currentDirection = this.velocity.x > 0 ? 'right' : 'left'
       this.currentAnimation = this.isRunning ? 'run' : 'walk'
     } else {
       this.currentAnimation = 'stand'
